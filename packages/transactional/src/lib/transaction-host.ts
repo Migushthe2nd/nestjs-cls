@@ -14,6 +14,12 @@ import {
 } from './propagation';
 import { getTransactionClsKey, TRANSACTIONAL_ADAPTER_OPTIONS } from './symbols';
 
+// Symbols for storing commit and rollback hooks in CLS context
+const COMMIT_HOOKS_SYMBOL = Symbol('COMMIT_HOOKS');
+const ROLLBACK_HOOKS_SYMBOL = Symbol('ROLLBACK_HOOKS');
+
+type HookFunction = () => void | Promise<void>;
+
 @Injectable()
 export class TransactionHost<TAdapter = never> {
     private readonly cls = ClsServiceManager.getClsService();
@@ -22,6 +28,9 @@ export class TransactionHost<TAdapter = never> {
 
     private static _instanceMap = new Map<symbol, TransactionHost>();
 
+    // Symbol keys for commit and rollback hooks in the current transaction
+    private readonly commitHooksSymbol = COMMIT_HOOKS_SYMBOL;
+    private readonly rollbackHooksSymbol = ROLLBACK_HOOKS_SYMBOL;
     /**
      * Get a singleton instance of the TransactionHost outside of DI.
      *
@@ -213,15 +222,108 @@ export class TransactionHost<TAdapter = never> {
         }
     }
 
+    /**
+     * Register a function to be executed when the current transaction is committed.
+     * If no transaction is active, the function will not be registered.
+     *
+     * @param fn The function to run on commit
+     */
+    runOnCommit(fn: HookFunction): void {
+        if (!this.isTransactionActive()) {
+            this.logger.warn('No active transaction, commit hook will not be registered');
+            return;
+        }
+
+        const hooks = this.cls.get<HookFunction[]>(this.commitHooksSymbol) || [];
+        hooks.push(fn);
+        this.cls.set(this.commitHooksSymbol, hooks);
+    }
+
+    /**
+     * Register a function to be executed when the current transaction is rolled back.
+     * If no transaction is active, the function will not be registered.
+     *
+     * @param fn The function to run on rollback
+     */
+    runOnRollback(fn: HookFunction): void {
+        if (!this.isTransactionActive()) {
+            this.logger.warn('No active transaction, rollback hook will not be registered');
+            return;
+        }
+
+        const hooks = this.cls.get<HookFunction[]>(this.rollbackHooksSymbol) || [];
+        hooks.push(fn);
+        this.cls.set(this.rollbackHooksSymbol, hooks);
+    }
+
+    /**
+     * Execute all registered commit hooks
+     * @private
+     */
+    private async executeCommitHooks(): Promise<void> {
+        const hooks = this.cls.get<HookFunction[]>(this.commitHooksSymbol) || [];
+        if (hooks.length === 0) return;
+
+        this.logger.debug(`Executing ${hooks.length} commit hooks`);
+        for (const hook of hooks) {
+            try {
+                await Promise.resolve(hook());
+            } catch (error) {
+                this.logger.error('Error executing commit hook', error);
+            }
+        }
+        // Clear hooks after execution
+        this.cls.set(this.commitHooksSymbol, []);
+    }
+
+    /**
+     * Execute all registered rollback hooks
+     * @private
+     */
+    private async executeRollbackHooks(): Promise<void> {
+        const hooks = this.cls.get<HookFunction[]>(this.rollbackHooksSymbol) || [];
+        if (hooks.length === 0) return;
+
+        this.logger.debug(`Executing ${hooks.length} rollback hooks`);
+        for (const hook of hooks) {
+            try {
+                await Promise.resolve(hook());
+            } catch (error) {
+                this.logger.error('Error executing rollback hook', error);
+            }
+        }
+        // Clear hooks after execution
+        this.cls.set(this.rollbackHooksSymbol, []);
+    }
+
     private runWithTransaction(
         options: any,
         fn: (...args: any[]) => Promise<any>,
     ) {
-        return this.cls.run({ ifNested: 'inherit' }, () =>
-            this._options
+        return this.cls.run({ ifNested: 'inherit' }, () => {
+            // Initialize empty hook arrays
+            this.cls.set(this.commitHooksSymbol, []);
+            this.cls.set(this.rollbackHooksSymbol, []);
+
+            return this._options
                 .wrapWithTransaction(options, fn, this.setTxInstance.bind(this))
-                .finally(() => this.setTxInstance(undefined)),
-        );
+                .then(async (result) => {
+                    // Transaction succeeded, execute commit hooks
+                    await this.executeCommitHooks();
+                    return result;
+                })
+                .catch(async (error) => {
+                    // Transaction failed, execute rollback hooks
+                    await this.executeRollbackHooks();
+                    throw error;
+                })
+                .finally(() => {
+                    this.setTxInstance(undefined);
+                    // Clear hooks
+                    this.cls.set(this.commitHooksSymbol, undefined);
+                    this.cls.set(this.rollbackHooksSymbol, undefined);
+                })
+        });
     }
 
     /**
@@ -233,6 +335,9 @@ export class TransactionHost<TAdapter = never> {
     withoutTransaction<R>(fn: (...args: any[]) => Promise<R>): Promise<R> {
         return this.cls.run({ ifNested: 'inherit' }, () => {
             this.setTxInstance(undefined);
+            // Clear any hooks that might exist
+            this.cls.set(this.commitHooksSymbol, undefined);
+            this.cls.set(this.rollbackHooksSymbol, undefined);
             return fn().finally(() => this.setTxInstance(undefined));
         });
     }

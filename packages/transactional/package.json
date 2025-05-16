@@ -1,7 +1,7 @@
 {
-  "name": "@nestjs-cls/transactional",
-  "version": "2.7.0",
-  "description": "A nestjs-cls plugin for transactional decorators",
+  "name": "nestjs-cls-transactional-hook",
+  "version": "2.7.1",
+  "description": "A modified nestjs-cls plugin for transactional decorators",
   "author": "papooch",
   "license": "MIT",
   "engines": {
@@ -12,9 +12,8 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Papooch/nestjs-cls.git"
+    "url": "git+https://github.com/Migushthe2nd/nestjs-cls.git"
   },
-  "homepage": "https://papooch.github.io/nestjs-cls/",
   "keywords": [
     "nest",
     "nestjs",
