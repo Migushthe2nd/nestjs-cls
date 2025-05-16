@@ -1,6 +1,6 @@
 {
   "name": "nestjs-cls-transactional-hook",
-  "version": "2.7.1",
+  "version": "2.7.2",
   "description": "A modified nestjs-cls plugin for transactional decorators",
   "author": "papooch",
   "license": "MIT",

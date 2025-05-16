@@ -266,11 +266,7 @@ export class TransactionHost<TAdapter = never> {
 
         this.logger.debug(`Executing ${hooks.length} commit hooks`);
         for (const hook of hooks) {
-            try {
-                await Promise.resolve(hook());
-            } catch (error) {
-                this.logger.error('Error executing commit hook', error);
-            }
+            Promise.resolve(hook()).catch((e) => this.logger.error('Error executing commit hook', e));
         }
         // Clear hooks after execution
         this.cls.set(this.commitHooksSymbol, []);
@@ -286,11 +282,7 @@ export class TransactionHost<TAdapter = never> {
 
         this.logger.debug(`Executing ${hooks.length} rollback hooks`);
         for (const hook of hooks) {
-            try {
-                await Promise.resolve(hook());
-            } catch (error) {
-                this.logger.error('Error executing rollback hook', error);
-            }
+            Promise.resolve(hook()).catch((e) => this.logger.error('Error executing rollback hook', e));
         }
         // Clear hooks after execution
         this.cls.set(this.rollbackHooksSymbol, []);
